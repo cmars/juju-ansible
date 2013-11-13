@@ -13,7 +13,6 @@ With their powers combined, you can have opinionated deployments that just work,
 Install
 -------
 Juju and Ansible both need to be installed on your system and in your $PATH.
-juju-ansible also needs jinja2 ('apt-get install python-jinja2' or 'pip install jinja2')
 
 Then copy 'juju-ansible' into your $PATH.
 
@@ -50,7 +49,7 @@ I've only tested juju-ansible with an OpenStack Juju environment. YMMV, but let 
 
 TODO
 ----
-More groups (unit, distribution, what else?). Iterating on your much appreciated feedback. What else?
+More groups (by unit, distribution, interface, etc.). Iterating on your much appreciated feedback. What else?
 
 License
 -------
