@@ -6,7 +6,7 @@ Why?
 ----
 [Juju](https://juju.ubuntu.com) is unmatched at orchestrating services with complex configuration inter-dependencies that just work.
 
-[Ansible](http://www.ansibleworks.com/docs) is a both simple and powerful tool for distributing ad-hoc, low-level system administration tasks to a large number of machines over ubiquitous SSH.
+[Ansible](http://www.ansibleworks.com/docs) is a simple and powerful tool for distributing ad-hoc, low-level system administration tasks to a large number of machines over ubiquitous SSH.
 
 With their powers combined, you can have opinionated deployments that just work, and then easily go customize and administer them.
 
