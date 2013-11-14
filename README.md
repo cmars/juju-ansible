@@ -20,16 +20,16 @@ For playbook support, make a symbolic link 'juju-ansible-playbook' to 'juju-ansi
 
 Usage
 -----
-juju-ansible dynamically creates an inventory file from the status of your current Juju environment. All other arguments are passed on to Ansible:
+juju-ansible builds a dynamic inventory from the status of your current Juju environment. All other arguments are passed on to Ansible:
 
     $ juju ansible <group> [ansible arguments...]
     $ juju ansible-playbook [ansible-playbook arguments...]
 
-Or send the inventory file to stdout without executing Ansible:
+Or use juju-ansible as a dynamic inventory script:
 
-    $ juju ansible --show
+	$ ansible all -i /path/to/juju-ansible ...
 
-Groups are defined for each service. The machines allocated to each service is put in that group. Depending on how you map your services onto machines, these could overlap.
+Groups are currently defined for each service and series.
 
 Example
 -------
@@ -49,7 +49,7 @@ I've only tested juju-ansible with an OpenStack Juju environment. YMMV, but let 
 
 TODO
 ----
-More groups (by unit, distribution, interface, etc.). Iterating on your much appreciated feedback. What else?
+More groups (by unit, distribution, interface, etc.) and hostvars from charm configuration parameters. Iterating on your much appreciated feedback. What else?
 
 License
 -------
