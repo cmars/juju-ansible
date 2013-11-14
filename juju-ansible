@@ -14,32 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import atexit
 import json
 import os
 import re
 import subprocess
 import sys
-import tempfile
-
-import jinja2
-
-inventory_template = jinja2.Environment(trim_blocks=True, lstrip_blocks=True).from_string("""
-[all]
-{% for machine_num, machine in status.machines.iteritems() %}
-{{ machine['dns-name'] }}
-{% endfor %}
-
-{% for service_name, service in status.services.iteritems() %}
-[{{ service_name }}]
-{% for unit_name, unit in service.units.iteritems() %}
-{% if unit.machine %}
-{{ status.machines[unit.machine]['dns-name'] }}
-{% endif %}
-{% endfor %}
-
-{% endfor %}
-""")
 
 
 def is_exe(fpath):
@@ -66,7 +45,7 @@ def which(program):
 
 class JujuCmdError(Exception):
 	"""Juju command failure exception."""
-	def __init__(self, messsage, stderr=None, rc=-1):
+	def __init__(self, message, stderr=None, rc=-1):
 		self.stderr = stderr
 		self.rc = rc
 		Exception.__init__(self, message)
@@ -82,8 +61,32 @@ def juju_status():
 	return json.loads(stdout)
 
 
-def to_inventory_file(status):
-	return inventory_template.render(status=status)
+def to_inventory_object(status):
+	"""Restructure juju status into an Ansible dynamic inventory.
+	Groups are currently created for each service and series."""
+	result = {}
+
+	# Create the 'all' group, and a group for each distribution series
+	for machine_num, machine in status.get('machines', {}).iteritems():
+		if not machine.get('dns-name'):
+			continue
+		result.setdefault('all', []).append(machine['dns-name'])
+		if machine.get('series'):
+			result.setdefault(machine['series'], []).append(machine['dns-name'])
+
+	# Create groups for each service
+	for service_name, service in status.get('services', {}).iteritems():
+		for unit_name, unit in service.get('units', []).iteritems():
+			if status.get('machines', {}).get(unit.get('machine'), {}).get('dns-name'):
+				result.setdefault(service_name, []).append(
+						status['machines'][unit['machine']]['dns-name'])
+
+	# Unique all the hosts, in case there are duplicates. Could happen,
+	# if multiple units are targeted to a machine.
+	for k in result.keys():
+		result[k] = list(set(result[k]))
+
+	return result
 
 
 if __name__ == '__main__':
@@ -94,13 +97,19 @@ if __name__ == '__main__':
 			raise Exception("""'juju' was not found in your path, check your Juju installation.
 See https://juju.ubuntu.com/install/ for installation instructions.""")
 
-		# Build an Ansible inventory file from Juju environment status
-		status = juju_status()
-		inventory = to_inventory_file(status)
-
-		# For --show, don't need to run ansible
-		if sys.argv[1:] and sys.argv[1:][0] == '--show':
-			print inventory
+		# For no arguments, or just --list, just output the inventory.
+		# This allows juju-ansible to be used as a dynamic inventory plugin.
+		if not sys.argv[1:] or sys.argv[1] == '--list':
+			# Build an Ansible inventory file from Juju environment status
+			status = juju_status()
+			inv = to_inventory_object(status)
+			sys.stdout.write(json.dumps(inv, indent=4))
+			sys.stdout.flush()
+			os._exit(0)
+		if sys.argv[1] == '--host':
+			# hostvars not supported yet, exit quickly to minimize the lookup cost
+			sys.stdout.write(json.dumps({}))
+			sys.stdout.flush()
 			os._exit(0)
 
 		# Derive ansible command, check that it is actually installed
@@ -111,18 +120,9 @@ See https://juju.ubuntu.com/install/ for installation instructions.""")
 See http://www.ansibleworks.com/docs/intro_installation.html for installation instructions.""" % (
 				ansible_cmd))
 
-		# Write inventory file to temp file, cleanup at exit
-		inventory_filename = None
-		with tempfile.NamedTemporaryFile(delete=False) as f:
-			f.write(inventory)
-			inventory_filename = f.name
-
-		def cleanup(*args, **kwargs):
-			os.unlink(inventory_filename)
-		atexit.register(cleanup)
-
-		# Build ansible command line and execute it
-		cmdline = [ansible_cmd, "-i", inventory_filename]
+		# Run ansible with command line arguments passed to this script,
+		# passing ourselves as the dynamic inventory script.
+		cmdline = [ansible_cmd, "-i", sys.argv[0]]
 		cmdline.extend(sys.argv[1:])
 		p = subprocess.Popen(cmdline)
 		p.wait()
