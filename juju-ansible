@@ -22,114 +22,125 @@ import sys
 
 
 def is_exe(fpath):
-	"""Test if fpath is an executable file."""
-	return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
+    """Test if fpath is an executable file."""
+    return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
 
 
 def which(program):
-	"""Get the absolute path to the executable by name,
-	if it exists in the $PATH."""
-	fpath, fname = os.path.split(program)
-	if fpath:
-		if is_exe(program):
-			return program
-	else:
-		for path in os.environ["PATH"].split(os.pathsep):
-			path = path.strip('"')
-			exe_file = os.path.join(path, program)
-			if is_exe(exe_file):
-				return exe_file
+    """Get the absolute path to the executable by name,
+    if it exists in the $PATH."""
+    fpath, fname = os.path.split(program)
+    if fpath:
+        if is_exe(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            path = path.strip('"')
+            exe_file = os.path.join(path, program)
+            if is_exe(exe_file):
+                return exe_file
 
-	return None
+    return None
 
 
 class JujuCmdError(Exception):
-	"""Juju command failure exception."""
-	def __init__(self, message, stderr=None, rc=-1):
-		self.stderr = stderr
-		self.rc = rc
-		Exception.__init__(self, message)
+    """Juju command failure exception."""
+    def __init__(self, message, stderr=None, rc=-1):
+        self.stderr = stderr
+        self.rc = rc
+        Exception.__init__(self, message)
 
 
 def juju_status():
-	"""Deserialize the current Juju status."""
-	p = subprocess.Popen(["juju", "status", "--format", "json"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-	stdout, stderr = p.communicate()
-	if p.returncode:
-		raise JujuCmdError("Error executing 'juju status'. Please check your Juju environment and try again.",
-			stderr=stderr, rc=p.returncode)
-	return json.loads(stdout)
+    """Deserialize the current Juju status."""
+    p = subprocess.Popen(["juju", "status", "--format", "json"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = p.communicate()
+    if p.returncode:
+        raise JujuCmdError("Error executing 'juju status'. Please check your Juju environment and try again.",
+            stderr=stderr, rc=p.returncode)
+    return json.loads(stdout)
 
 
 def to_inventory_object(status):
-	"""Restructure juju status into an Ansible dynamic inventory.
-	Groups are currently created for each service and series."""
-	result = {}
+    """Restructure juju status into an Ansible dynamic inventory.
+    Groups are currently created for each service and series."""
+    result = {}
+    containers = []
+    container_machines = {}
 
-	# Create the 'all' group, and a group for each distribution series
-	for machine_num, machine in status.get('machines', {}).iteritems():
-		if not machine.get('dns-name'):
-			continue
-		result.setdefault('all', []).append(machine['dns-name'])
-		if machine.get('series'):
-			result.setdefault(machine['series'], []).append(machine['dns-name'])
+    # Create the 'all' group, and a group for each distribution series
+    for machine_num, machine in status.get('machines', {}).iteritems():
+        if not machine.get('dns-name'):
+            continue
+        result.setdefault('all', []).append(machine['dns-name'])
+        if machine.get('series'):
+            result.setdefault(machine['series'], []).append(machine['dns-name'])
 
-	# Create groups for each service
-	for service_name, service in status.get('services', {}).iteritems():
-		for unit_name, unit in service.get('units', []).iteritems():
-			if status.get('machines', {}).get(unit.get('machine'), {}).get('dns-name'):
-				result.setdefault(service_name, []).append(
-						status['machines'][unit['machine']]['dns-name'])
+        for container_name, container in machine.get('containers', {}).iteritems():
+            if container.get('dns-name'):
+                containers.append((container_name, container))
+                container_machines.setdefault(container_name, machine_num)
 
-	# Unique all the hosts, in case there are duplicates. Could happen,
-	# if multiple units are targeted to a machine.
-	for k in result.keys():
-		result[k] = list(set(result[k]))
+    # Pull up containers to machine level for resolving below
+    for container_name, container in containers:
+        status.get('machines', {}).setdefault(container_name, container)
 
-	return result
+    # Create groups for each service
+    for service_name, service in status.get('services', {}).iteritems():
+        for unit_name, unit in service.get('units', []).iteritems():
+            if status.get('machines', {}).get(unit.get('machine'), {}).get('dns-name'):
+                result.setdefault(service_name, []).append(
+                        status['machines'][unit['machine']]['dns-name'])
+
+    # Unique all the hosts, in case there are duplicates. Could happen,
+    # if multiple units are targeted to a machine.
+    for k in result.keys():
+        result[k] = list(set(result[k]))
+
+    return result
 
 
 if __name__ == '__main__':
-	try:
-		# Check that juju is installed
-		juju_cmd_path = which("juju")
-		if not juju_cmd_path:
-			raise Exception("""'juju' was not found in your path, check your Juju installation.
+    try:
+        # Check that juju is installed
+        juju_cmd_path = which("juju")
+        if not juju_cmd_path:
+            raise Exception("""'juju' was not found in your path, check your Juju installation.
 See https://juju.ubuntu.com/install/ for installation instructions.""")
 
-		# For no arguments, or just --list, just output the inventory.
-		# This allows juju-ansible to be used as a dynamic inventory plugin.
-		if not sys.argv[1:] or sys.argv[1] == '--list':
-			# Build an Ansible inventory file from Juju environment status
-			status = juju_status()
-			inv = to_inventory_object(status)
-			sys.stdout.write(json.dumps(inv, indent=4))
-			sys.stdout.flush()
-			os._exit(0)
-		if sys.argv[1] == '--host':
-			# hostvars not supported yet, exit quickly to minimize the lookup cost
-			sys.stdout.write(json.dumps({}))
-			sys.stdout.flush()
-			os._exit(0)
+        # For no arguments, or just --list, just output the inventory.
+        # This allows juju-ansible to be used as a dynamic inventory plugin.
+        if not sys.argv[1:] or sys.argv[1] == '--list':
+            # Build an Ansible inventory file from Juju environment status
+            status = juju_status()
+            inv = to_inventory_object(status)
+            sys.stdout.write(json.dumps(inv, indent=4))
+            sys.stdout.flush()
+            os._exit(0)
+        if sys.argv[1] == '--host':
+            # hostvars not supported yet, exit quickly to minimize the lookup cost
+            sys.stdout.write(json.dumps({}))
+            sys.stdout.flush()
+            os._exit(0)
 
-		# Derive ansible command, check that it is actually installed
-		ansible_cmd = re.sub('juju-', '', os.path.basename(sys.argv[0]))
-		ansible_cmd_path = which(ansible_cmd)
-		if not ansible_cmd_path:
-			raise Exception("""'%s' was not found in your path, check your Ansible installation.
+        # Derive ansible command, check that it is actually installed
+        ansible_cmd = re.sub('juju-', '', os.path.basename(sys.argv[0]))
+        ansible_cmd_path = which(ansible_cmd)
+        if not ansible_cmd_path:
+            raise Exception("""'%s' was not found in your path, check your Ansible installation.
 See http://www.ansibleworks.com/docs/intro_installation.html for installation instructions.""" % (
-				ansible_cmd))
+                ansible_cmd))
 
-		# Run ansible with command line arguments passed to this script,
-		# passing ourselves as the dynamic inventory script.
-		cmdline = [ansible_cmd, "-i", sys.argv[0]]
-		cmdline.extend(sys.argv[1:])
-		p = subprocess.Popen(cmdline)
-		p.wait()
-		os._exit(p.returncode)
-	except Exception, e:
-		print >>sys.stderr, "Error: %s" % (e.message)
-		os._exit(1)
-	except:
-		print >>sys.stderr, "An unknown error occurred."
-		os._exit(1)
+        # Run ansible with command line arguments passed to this script,
+        # passing ourselves as the dynamic inventory script.
+        cmdline = [ansible_cmd, "-i", sys.argv[0]]
+        cmdline.extend(sys.argv[1:])
+        p = subprocess.Popen(cmdline)
+        p.wait()
+        os._exit(p.returncode)
+    except Exception, e:
+        print >>sys.stderr, "Error: %s" % (e.message)
+        os._exit(1)
+    except:
+        print >>sys.stderr, "An unknown error occurred."
+        os._exit(1)
