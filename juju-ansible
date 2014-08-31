@@ -76,11 +76,10 @@ def to_inventory_object(status):
 
 	# Create groups for each service
 	for service_name, service in status.get('services', {}).iteritems():
-		if service.get('units') is not None:
-			for unit_name, unit in service.get('units', []).iteritems():
-				if status.get('machines', {}).get(unit.get('machine'), {}).get('dns-name'):
-					result.setdefault(service_name, []).append(
-						status['machines'][unit['machine']]['dns-name'])
+		for unit_name, unit in service.get('units', {}).iteritems():
+			if status.get('machines', {}).get(unit.get('machine'), {}).get('dns-name'):
+				result.setdefault(service_name, []).append(
+					status['machines'][unit['machine']]['dns-name'])
 
 	# Unique all the hosts, in case there are duplicates. Could happen,
 	# if multiple units are targeted to a machine.
